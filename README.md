@@ -7,6 +7,7 @@ It is responsible for:
 - local key generation and import
 - key-handle management
 - local identity selection
+- local payment account creation and binding
 - signing raw bytes and structured payloads
 - capability/delegation token signing
 - local wallet metadata
@@ -36,11 +37,15 @@ watt-wallet -> watt-did
 - Rust library crate
 - `Ed25519` local key generation
 - `Ed25519` seed import
+- `secp256k1` local key generation for payment accounts
+- EVM address derivation for Web3 settlement accounts
 - in-memory keystore
 - file-backed local keystore for development
 - file-backed wallet metadata store
 - active identity selection
+- active payment account selection
 - multiple local identities
+- multiple local payment accounts
 - key rotation model
 - raw payload signing and verification
 - structured JSON payload signing helpers
@@ -57,6 +62,7 @@ watt-wallet -> watt-did
 - `Wallet`
 - `WalletProfileMetadata`
 - `LocalIdentity`
+- `PaymentAccount`
 - `SignerCapabilityMetadata`
 - `CapabilityToken`
 
@@ -140,6 +146,27 @@ assert_eq!(token.token.split('.').count(), 3);
 # Ok::<(), watt_wallet::WalletError>(())
 ```
 
+### Create a Web3 payment account for x402
+
+```rust
+use watt_wallet::{FileWalletMetadataStore, InMemoryKeyStore, Wallet};
+
+let metadata_store = FileWalletMetadataStore::new("/tmp/watt-wallet-metadata-4.json");
+let keystore = InMemoryKeyStore::new();
+let mut wallet = Wallet::new(keystore, metadata_store);
+let mut profile = wallet.load_or_create_profile("default", 1)?;
+let payment = wallet.create_payment_account_web3_evm(
+    &mut profile,
+    Some("settlement".into()),
+    Some("base-sepolia".into()),
+    Some("x402".into()),
+    1,
+)?;
+assert_eq!(payment.rail, "x402");
+assert!(payment.address.as_deref().is_some());
+# Ok::<(), watt_wallet::WalletError>(())
+```
+
 ## CLI
 
 The project includes a small local CLI:
@@ -148,6 +175,11 @@ The project includes a small local CLI:
 cargo run --bin watt-wallet -- help
 cargo run --bin watt-wallet -- create-identity alice
 cargo run --bin watt-wallet -- list-identities
+cargo run --bin watt-wallet -- create-payment-account settlement base-sepolia
+cargo run --bin watt-wallet -- import-payment-account <private-key-hex> settlement base-sepolia
+cargo run --bin watt-wallet -- watch-payment-account 0xabc... settlement base-sepolia
+cargo run --bin watt-wallet -- list-payment-accounts
+cargo run --bin watt-wallet -- bind-payment-account <account-id>
 cargo run --bin watt-wallet -- sign-test-payload "hello"
 cargo run --bin watt-wallet -- sign-capability
 ```

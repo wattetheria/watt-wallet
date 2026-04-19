@@ -15,7 +15,8 @@ pub use crate::keystore::{
 };
 pub use crate::metadata::{FileWalletMetadataStore, WalletMetadataStore};
 pub use crate::model::{
-    IdentityStatus, KeyHandle, LocalIdentity, SignerCapabilityMetadata, SignerPurpose,
-    SigningAlgorithm, WalletProfileMetadata,
+    IdentityStatus, KeyHandle, LocalIdentity, PaymentAccount, PaymentAccountKind,
+    PaymentAccountParams, PaymentAccountStatus, PaymentLayer, SignerCapabilityMetadata,
+    SignerPurpose, SigningAlgorithm, WalletProfileMetadata,
 };
 pub use crate::wallet::Wallet;

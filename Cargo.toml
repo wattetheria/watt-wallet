@@ -7,9 +7,12 @@ edition = "2024"
 base64 = "0.22"
 bs58 = "0.5"
 ed25519-dalek = "2"
+hex = "0.4"
+k256 = "0.13"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha3 = "0.10"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 watt-did = { path = "../watt-did" }

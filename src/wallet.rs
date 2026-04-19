@@ -3,7 +3,8 @@ use crate::error::{Result, WalletError};
 use crate::keystore::{KeyMaterialInfo, KeyStore, SignatureBytes};
 use crate::metadata::WalletMetadataStore;
 use crate::model::{
-    IdentityStatus, LocalIdentity, SignerCapabilityMetadata, SignerPurpose, SigningAlgorithm,
+    IdentityStatus, LocalIdentity, PaymentAccount, PaymentAccountKind, PaymentAccountParams,
+    PaymentAccountStatus, PaymentLayer, SignerCapabilityMetadata, SignerPurpose, SigningAlgorithm,
     WalletProfileMetadata,
 };
 
@@ -94,6 +95,138 @@ where
         }
         self.metadata_store.save(profile)?;
         Ok(())
+    }
+
+    pub fn create_payment_account_web3_evm(
+        &mut self,
+        profile: &mut WalletProfileMetadata,
+        label: Option<String>,
+        network: Option<String>,
+        rail: Option<String>,
+        now_ms: u64,
+    ) -> Result<PaymentAccount> {
+        let key_info = self.keystore.generate_secp256k1()?;
+        let account = build_web3_evm_payment_account(
+            key_info,
+            label,
+            network,
+            rail.unwrap_or_else(|| "x402".to_string()),
+            now_ms,
+        );
+        profile.add_payment_account(account.clone());
+        profile.updated_at_ms = now_ms;
+        self.metadata_store.save(profile)?;
+        Ok(account)
+    }
+
+    pub fn import_payment_account_web3_evm_secret(
+        &mut self,
+        profile: &mut WalletProfileMetadata,
+        secret: [u8; 32],
+        label: Option<String>,
+        network: Option<String>,
+        rail: Option<String>,
+        now_ms: u64,
+    ) -> Result<PaymentAccount> {
+        let key_info = self.keystore.import_secp256k1_secret(secret)?;
+        let account = build_web3_evm_payment_account(
+            key_info,
+            label,
+            network,
+            rail.unwrap_or_else(|| "x402".to_string()),
+            now_ms,
+        );
+        profile.add_payment_account(account.clone());
+        profile.updated_at_ms = now_ms;
+        self.metadata_store.save(profile)?;
+        Ok(account)
+    }
+
+    pub fn register_watch_payment_account_web3_evm(
+        &self,
+        profile: &mut WalletProfileMetadata,
+        address: String,
+        label: Option<String>,
+        network: Option<String>,
+        rail: Option<String>,
+        now_ms: u64,
+    ) -> Result<PaymentAccount> {
+        let account = PaymentAccount::new(PaymentAccountParams {
+            key_handle: None,
+            kind: PaymentAccountKind::Web3Evm,
+            layer: PaymentLayer::Web3,
+            rail: rail.unwrap_or_else(|| "x402".to_string()),
+            network,
+            address: Some(address),
+            provider_account_id: None,
+            label,
+            capabilities: vec!["receive".into()],
+            created_at_ms: now_ms,
+        });
+        profile.add_payment_account(account.clone());
+        profile.updated_at_ms = now_ms;
+        self.metadata_store.save(profile)?;
+        Ok(account)
+    }
+
+    pub fn list_payment_accounts(&self, profile: &WalletProfileMetadata) -> Vec<PaymentAccount> {
+        profile.payment_accounts.clone()
+    }
+
+    pub fn set_active_payment_account(
+        &self,
+        profile: &mut WalletProfileMetadata,
+        account_id: &str,
+        now_ms: u64,
+    ) -> Result<()> {
+        if !profile.set_active_payment_account(account_id, now_ms) {
+            return Err(WalletError::UnknownPaymentAccountId(account_id.to_owned()));
+        }
+        self.metadata_store.save(profile)?;
+        Ok(())
+    }
+
+    pub fn active_payment_account<'a>(
+        &self,
+        profile: &'a WalletProfileMetadata,
+    ) -> Result<&'a PaymentAccount> {
+        let account = profile
+            .active_payment_account()
+            .ok_or(WalletError::NoActivePaymentAccount)?;
+        if account.status != PaymentAccountStatus::Active {
+            return Err(WalletError::PaymentAccountNotActive(
+                account.account_id.clone(),
+            ));
+        }
+        Ok(account)
+    }
+
+    pub fn payment_account<'a>(
+        &self,
+        profile: &'a WalletProfileMetadata,
+        account_id: &str,
+    ) -> Result<&'a PaymentAccount> {
+        let account = profile
+            .payment_account(account_id)
+            .ok_or_else(|| WalletError::UnknownPaymentAccountId(account_id.to_owned()))?;
+        if account.status != PaymentAccountStatus::Active {
+            return Err(WalletError::PaymentAccountNotActive(
+                account.account_id.clone(),
+            ));
+        }
+        Ok(account)
+    }
+
+    pub fn export_active_payment_account_web3_evm_secret(
+        &self,
+        profile: &WalletProfileMetadata,
+    ) -> Result<[u8; 32]> {
+        let account = self.active_payment_account(profile)?;
+        let key_handle = account
+            .key_handle
+            .as_ref()
+            .ok_or_else(|| WalletError::Metadata("active payment account is watch-only".into()))?;
+        self.keystore.export_secp256k1_secret(key_handle)
     }
 
     pub fn active_identity<'a>(
@@ -195,6 +328,27 @@ fn build_identity_from_key_info(
     )
 }
 
+fn build_web3_evm_payment_account(
+    key_info: KeyMaterialInfo,
+    label: Option<String>,
+    network: Option<String>,
+    rail: String,
+    now_ms: u64,
+) -> PaymentAccount {
+    PaymentAccount::new(PaymentAccountParams {
+        key_handle: Some(key_info.key_handle),
+        kind: PaymentAccountKind::Web3Evm,
+        layer: PaymentLayer::Web3,
+        rail,
+        network,
+        address: key_info.derived_address,
+        provider_account_id: None,
+        label,
+        capabilities: vec!["send".into(), "receive".into()],
+        created_at_ms: now_ms,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +392,46 @@ mod tests {
             .rotate_active_identity(&mut profile, Some("alice-2".into()), vec![], 2)
             .unwrap();
         assert_ne!(identity.identity_id, rotated.identity_id);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn wallet_can_create_and_bind_payment_account() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let path = std::env::temp_dir().join(format!("watt-wallet-payment-{unique}.json"));
+        let store = FileWalletMetadataStore::new(&path);
+        let keystore = InMemoryKeyStore::new();
+        let mut wallet = Wallet::new(keystore, store);
+        let mut profile = wallet.load_or_create_profile("default", 1).unwrap();
+        let account = wallet
+            .create_payment_account_web3_evm(
+                &mut profile,
+                Some("settlement".into()),
+                Some("base-sepolia".into()),
+                Some("x402".into()),
+                1,
+            )
+            .unwrap();
+        assert_eq!(account.kind, PaymentAccountKind::Web3Evm);
+        assert!(account.is_key_controlled());
+        assert!(
+            account
+                .address
+                .as_deref()
+                .is_some_and(|value| value.starts_with("0x"))
+        );
+        wallet
+            .set_active_payment_account(&mut profile, &account.account_id, 2)
+            .unwrap();
+        let active = wallet.active_payment_account(&profile).unwrap();
+        assert_eq!(active.account_id, account.account_id);
+        let secret = wallet
+            .export_active_payment_account_web3_evm_secret(&profile)
+            .unwrap();
+        assert_eq!(secret.len(), 32);
         let _ = fs::remove_file(path);
     }
 }

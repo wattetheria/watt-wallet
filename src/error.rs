@@ -14,6 +14,12 @@ pub enum WalletError {
     UnknownIdentityId(String),
     #[error("no active identity configured")]
     NoActiveIdentity,
+    #[error("unknown payment account id: {0}")]
+    UnknownPaymentAccountId(String),
+    #[error("no active payment account configured")]
+    NoActivePaymentAccount,
+    #[error("payment account is not active: {0}")]
+    PaymentAccountNotActive(String),
     #[error("identity is not active: {0}")]
     IdentityNotActive(String),
     #[error("invalid secret key: {0}")]
