@@ -24,6 +24,31 @@ const SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX: [u8; 2] = [0xe7, 0x01];
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignatureBytes(pub Vec<u8>);
 
+pub fn verify_secp256k1_with_multibase_public_key(
+    public_key_multibase: &str,
+    payload: &[u8],
+    signature: &SignatureBytes,
+) -> Result<()> {
+    let bytes = decode_multibase(public_key_multibase)?;
+    if bytes.len() < SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len() + 33
+        || bytes[..SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len()]
+            != SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX
+    {
+        return Err(WalletError::InvalidSignature(
+            "invalid secp256k1 multibase public key".to_string(),
+        ));
+    }
+    let verifying_key = Secp256k1VerifyingKey::from_sec1_bytes(
+        &bytes[SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len()..],
+    )
+    .map_err(|error| WalletError::InvalidSignature(error.to_string()))?;
+    let signature = Secp256k1Signature::from_der(&signature.0)
+        .map_err(|error| WalletError::InvalidSignature(error.to_string()))?;
+    verifying_key
+        .verify(payload, &signature)
+        .map_err(|error| WalletError::InvalidSignature(error.to_string()))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyMaterialInfo {
     pub key_handle: KeyHandle,
@@ -474,6 +499,15 @@ fn decode_secret_key(secret_key_b64: &str) -> Result<[u8; 32]> {
     Ok(out)
 }
 
+fn decode_multibase(value: &str) -> Result<Vec<u8>> {
+    let encoded = value.strip_prefix('z').ok_or_else(|| {
+        WalletError::InvalidSignature("expected base58btc multibase public key".to_string())
+    })?;
+    bs58::decode(encoded)
+        .into_vec()
+        .map_err(|error| WalletError::InvalidSignature(error.to_string()))
+}
+
 fn secp256k1_signing_key_from_secret(secret: &[u8; 32]) -> Result<Secp256k1SigningKey> {
     Secp256k1SigningKey::from_bytes(secret.into())
         .map_err(|error| WalletError::InvalidSecretKey(error.to_string()))
@@ -520,6 +554,8 @@ mod tests {
                 .as_deref()
                 .is_some_and(|value| value.starts_with("0x"))
         );
+        verify_secp256k1_with_multibase_public_key(&info.public_key_multibase, payload, &signature)
+            .unwrap();
     }
 
     #[test]

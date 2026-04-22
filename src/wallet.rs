@@ -229,6 +229,31 @@ where
         self.keystore.export_secp256k1_secret(key_handle)
     }
 
+    pub fn active_payment_account_key_info(
+        &self,
+        profile: &WalletProfileMetadata,
+    ) -> Result<KeyMaterialInfo> {
+        let account = self.active_payment_account(profile)?;
+        let key_handle = account
+            .key_handle
+            .as_ref()
+            .ok_or_else(|| WalletError::Metadata("active payment account is watch-only".into()))?;
+        self.keystore.public_key_info(key_handle)
+    }
+
+    pub fn sign_with_active_payment_account(
+        &self,
+        profile: &WalletProfileMetadata,
+        payload: &[u8],
+    ) -> Result<SignatureBytes> {
+        let account = self.active_payment_account(profile)?;
+        let key_handle = account
+            .key_handle
+            .as_ref()
+            .ok_or_else(|| WalletError::Metadata("active payment account is watch-only".into()))?;
+        self.keystore.sign_bytes(key_handle, payload)
+    }
+
     pub fn active_identity<'a>(
         &self,
         profile: &'a WalletProfileMetadata,
@@ -432,6 +457,19 @@ mod tests {
             .export_active_payment_account_web3_evm_secret(&profile)
             .unwrap();
         assert_eq!(secret.len(), 32);
+        let key_info = wallet.active_payment_account_key_info(&profile).unwrap();
+        assert_eq!(
+            key_info.derived_address.as_deref(),
+            active.address.as_deref()
+        );
+        let signature = wallet
+            .sign_with_active_payment_account(&profile, b"payment-authz")
+            .unwrap();
+        let handle = active.key_handle.as_ref().unwrap();
+        wallet
+            .keystore
+            .verify_bytes(handle, b"payment-authz", &signature)
+            .unwrap();
         let _ = fs::remove_file(path);
     }
 }
