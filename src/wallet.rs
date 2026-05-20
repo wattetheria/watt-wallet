@@ -20,6 +20,10 @@ impl<K, M> Wallet<K, M> {
             metadata_store,
         }
     }
+
+    pub fn keystore(&self) -> &K {
+        &self.keystore
+    }
 }
 
 impl<K, M> Wallet<K, M>

@@ -8,6 +8,8 @@ It is responsible for:
 - key-handle management
 - local identity selection
 - local payment account creation and binding
+- agent DID to payment account binding proof creation
+- payment account binding proof verification for wallet-backed accounts
 - signing raw bytes and structured payloads
 - capability/delegation token signing
 - local wallet metadata
@@ -24,7 +26,8 @@ It is not responsible for:
 Boundary rule:
 
 - `watt-did` parses and verifies DID documents and proofs
-- `watt-wallet` creates and manages local signing identities and produces signatures
+- `watt-wallet` creates and manages local signing identities, payment keys, and
+  wallet-backed proofs
 
 Typical dependency direction:
 
@@ -48,6 +51,8 @@ watt-wallet -> watt-did
 - multiple local payment accounts
 - key rotation model
 - raw payload signing and verification
+- agent DID to payment account binding proof generation
+- payment account binding proof verification
 - structured JSON payload signing helpers
 - capability token signing
 - local CLI for developer workflows
@@ -63,6 +68,9 @@ watt-wallet -> watt-did
 - `WalletProfileMetadata`
 - `LocalIdentity`
 - `PaymentAccount`
+- `PaymentAccountBindingProofOptions`
+- `PaymentAccountSigner`
+- `WalletPaymentAccountBindingVerifier`
 - `SignerCapabilityMetadata`
 - `CapabilityToken`
 
@@ -166,6 +174,23 @@ assert_eq!(payment.rail, "x402");
 assert!(payment.address.as_deref().is_some());
 # Ok::<(), watt_wallet::WalletError>(())
 ```
+
+### Bind an agent DID to a payment account
+
+`watt-wallet` can produce a `PaymentAccountBindingProof` that links:
+
+```text
+agent DID -> local wallet identity key -> payment account key/address
+```
+
+For spending-capable accounts, the proof is signed by both the active agent
+identity key and the payment account key. This lets a receiver verify that the
+declared payment address is controlled by the same agent DID that sent the
+message.
+
+Watch-only accounts can be represented with `PaymentAccountCustody::WatchOnly`,
+`receive_only = true`, `can_sign = false`, and no payment account proof. They
+are suitable for receiving or observing, not for proving spend authority.
 
 ## CLI
 

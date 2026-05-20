@@ -29,20 +29,28 @@ pub fn verify_secp256k1_with_multibase_public_key(
     payload: &[u8],
     signature: &SignatureBytes,
 ) -> Result<()> {
-    let bytes = decode_multibase(public_key_multibase)?;
-    if bytes.len() < SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len() + 33
-        || bytes[..SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len()]
-            != SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX
-    {
-        return Err(WalletError::InvalidSignature(
-            "invalid secp256k1 multibase public key".to_string(),
-        ));
-    }
-    let verifying_key = Secp256k1VerifyingKey::from_sec1_bytes(
-        &bytes[SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len()..],
-    )
-    .map_err(|error| WalletError::InvalidSignature(error.to_string()))?;
+    let verifying_key = decode_secp256k1_multibase_public_key(public_key_multibase)?;
     let signature = Secp256k1Signature::from_der(&signature.0)
+        .map_err(|error| WalletError::InvalidSignature(error.to_string()))?;
+    verifying_key
+        .verify(payload, &signature)
+        .map_err(|error| WalletError::InvalidSignature(error.to_string()))
+}
+
+pub fn evm_address_from_secp256k1_multibase_public_key(
+    public_key_multibase: &str,
+) -> Result<String> {
+    let verifying_key = decode_secp256k1_multibase_public_key(public_key_multibase)?;
+    Ok(evm_address_from_verifying_key(&verifying_key))
+}
+
+pub fn verify_ed25519_with_multibase_public_key(
+    public_key_multibase: &str,
+    payload: &[u8],
+    signature: &SignatureBytes,
+) -> Result<()> {
+    let verifying_key = decode_ed25519_multibase_public_key(public_key_multibase)?;
+    let signature = Ed25519Signature::from_slice(&signature.0)
         .map_err(|error| WalletError::InvalidSignature(error.to_string()))?;
     verifying_key
         .verify(payload, &signature)
@@ -508,6 +516,39 @@ fn decode_multibase(value: &str) -> Result<Vec<u8>> {
         .map_err(|error| WalletError::InvalidSignature(error.to_string()))
 }
 
+fn decode_ed25519_multibase_public_key(public_key_multibase: &str) -> Result<Ed25519VerifyingKey> {
+    let bytes = decode_multibase(public_key_multibase)?;
+    if bytes.len() != ED25519_PUBLIC_KEY_MULTICODEC_PREFIX.len() + 32
+        || bytes[..ED25519_PUBLIC_KEY_MULTICODEC_PREFIX.len()]
+            != ED25519_PUBLIC_KEY_MULTICODEC_PREFIX
+    {
+        return Err(WalletError::InvalidSignature(
+            "invalid ed25519 multibase public key".to_string(),
+        ));
+    }
+    let key_bytes: [u8; 32] = bytes[ED25519_PUBLIC_KEY_MULTICODEC_PREFIX.len()..]
+        .try_into()
+        .map_err(|_| WalletError::InvalidSignature("ed25519 key length mismatch".to_string()))?;
+    Ed25519VerifyingKey::from_bytes(&key_bytes)
+        .map_err(|error| WalletError::InvalidSignature(error.to_string()))
+}
+
+fn decode_secp256k1_multibase_public_key(
+    public_key_multibase: &str,
+) -> Result<Secp256k1VerifyingKey> {
+    let bytes = decode_multibase(public_key_multibase)?;
+    if bytes.len() < SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len() + 33
+        || bytes[..SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len()]
+            != SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX
+    {
+        return Err(WalletError::InvalidSignature(
+            "invalid secp256k1 multibase public key".to_string(),
+        ));
+    }
+    Secp256k1VerifyingKey::from_sec1_bytes(&bytes[SECP256K1_PUBLIC_KEY_MULTICODEC_PREFIX.len()..])
+        .map_err(|error| WalletError::InvalidSignature(error.to_string()))
+}
+
 fn secp256k1_signing_key_from_secret(secret: &[u8; 32]) -> Result<Secp256k1SigningKey> {
     Secp256k1SigningKey::from_bytes(secret.into())
         .map_err(|error| WalletError::InvalidSecretKey(error.to_string()))
@@ -556,6 +597,10 @@ mod tests {
         );
         verify_secp256k1_with_multibase_public_key(&info.public_key_multibase, payload, &signature)
             .unwrap();
+        assert_eq!(
+            evm_address_from_secp256k1_multibase_public_key(&info.public_key_multibase).unwrap(),
+            info.derived_address.unwrap()
+        );
     }
 
     #[test]
