@@ -1,236 +1,87 @@
 # watt-wallet
 
-`watt-wallet` is the local key-custody and signing boundary for the Watt ecosystem.
+Local key custody, signing, and wallet metadata for the Watt ecosystem.
 
-It is responsible for:
+`watt-wallet` manages local identities and payment accounts, then signs payloads,
+capability tokens, and wallet-backed payment binding proofs. It deliberately does
+not own networking, registry behavior, product UI, or public agent discovery.
 
-- local key generation and import
-- key-handle management
-- local identity selection
-- local payment account creation and binding
-- agent DID to payment account binding proof creation
-- payment account binding proof verification for wallet-backed accounts
-- signing raw bytes and structured payloads
-- capability/delegation token signing
-- local wallet metadata
+## Scope
 
-It is not responsible for:
+- Generate and import local Ed25519 identity keys
+- Generate and import EVM-compatible payment account keys
+- Derive Web3 settlement addresses
+- Store wallet metadata and local key material for development workflows
+- Track active identity and active payment account selection
+- Sign raw bytes, structured JSON payloads, and capability tokens
+- Create and verify agent DID to payment account binding proofs
 
-- transport networking
-- service registry semantics
-- product UI logic
-- public-agent discovery
-
-## Relationship To `watt-did`
-
-Boundary rule:
-
-- `watt-did` parses and verifies DID documents and proofs
-- `watt-wallet` creates and manages local signing identities, payment keys, and
-  wallet-backed proofs
-
-Typical dependency direction:
+`watt-wallet` depends on `watt-did` for DID parsing and proof verification:
 
 ```text
 watt-wallet -> watt-did
 ```
 
-## Current Features
-
-- Rust library crate
-- `Ed25519` local key generation
-- `Ed25519` seed import
-- `secp256k1` local key generation for payment accounts
-- EVM address derivation for Web3 settlement accounts
-- in-memory keystore
-- file-backed local keystore for development
-- file-backed wallet metadata store
-- active identity selection
-- active payment account selection
-- multiple local identities
-- multiple local payment accounts
-- key rotation model
-- raw payload signing and verification
-- agent DID to payment account binding proof generation
-- payment account binding proof verification
-- structured JSON payload signing helpers
-- capability token signing
-- local CLI for developer workflows
-
-## Main Types
-
-- `KeyStore`
-- `InMemoryKeyStore`
-- `FileKeyStore`
-- `WalletMetadataStore`
-- `FileWalletMetadataStore`
-- `Wallet`
-- `WalletProfileMetadata`
-- `LocalIdentity`
-- `PaymentAccount`
-- `PaymentAccountBindingProofOptions`
-- `PaymentAccountSigner`
-- `WalletPaymentAccountBindingVerifier`
-- `SignerCapabilityMetadata`
-- `CapabilityToken`
-
 ## Quick Start
 
-### Create a wallet and local identity
-
 ```rust
 use watt_wallet::{InMemoryKeyStore, FileWalletMetadataStore, SignerPurpose, Wallet};
 
-let metadata_store = FileWalletMetadataStore::new("/tmp/watt-wallet-metadata.json");
-let keystore = InMemoryKeyStore::new();
-let mut wallet = Wallet::new(keystore, metadata_store);
-let mut profile = wallet.load_or_create_profile("default", 1)?;
-let identity = wallet.create_identity_ed25519(
-    &mut profile,
-    Some("alice".into()),
-    vec![SignerPurpose::General],
-    1,
-)?;
-assert_eq!(identity.did.method(), "key");
-# Ok::<(), watt_wallet::WalletError>(())
+fn main() -> watt_wallet::Result<()> {
+    let metadata_store = FileWalletMetadataStore::new("/tmp/watt-wallet-metadata.json");
+    let keystore = InMemoryKeyStore::new();
+    let mut wallet = Wallet::new(keystore, metadata_store);
+
+    let mut profile = wallet.load_or_create_profile("default", 1)?;
+    let identity = wallet.create_identity_ed25519(
+        &mut profile,
+        Some("alice".into()),
+        vec![SignerPurpose::General],
+        1,
+    )?;
+
+    let signature = wallet.sign_with_active_identity(&profile, b"hello")?;
+    wallet.verify_with_identity(&profile, &identity.identity_id, b"hello", &signature)?;
+    Ok(())
+}
 ```
-
-### Sign a payload with the active identity
-
-```rust
-use watt_wallet::{InMemoryKeyStore, FileWalletMetadataStore, SignerPurpose, Wallet};
-
-let metadata_store = FileWalletMetadataStore::new("/tmp/watt-wallet-metadata-2.json");
-let keystore = InMemoryKeyStore::new();
-let mut wallet = Wallet::new(keystore, metadata_store);
-let mut profile = wallet.load_or_create_profile("default", 1)?;
-let identity = wallet.create_identity_ed25519(
-    &mut profile,
-    Some("alice".into()),
-    vec![SignerPurpose::General],
-    1,
-)?;
-let signature = wallet.sign_with_active_identity(&profile, b"hello")?;
-wallet.verify_with_identity(&profile, &identity.identity_id, b"hello", &signature)?;
-# Ok::<(), watt_wallet::WalletError>(())
-```
-
-### Sign a capability token
-
-```rust
-use watt_did::UcanCapability;
-use watt_wallet::{
-    CapabilityTokenOptions, FileWalletMetadataStore, InMemoryKeyStore, SignerPurpose, Wallet,
-};
-
-let metadata_store = FileWalletMetadataStore::new("/tmp/watt-wallet-metadata-3.json");
-let keystore = InMemoryKeyStore::new();
-let mut wallet = Wallet::new(keystore, metadata_store);
-let mut profile = wallet.load_or_create_profile("default", 1)?;
-let identity = wallet.create_identity_ed25519(
-    &mut profile,
-    Some("alice".into()),
-    vec![SignerPurpose::CapabilityDelegation],
-    1,
-)?;
-let token = wallet.sign_capability_token(
-    &profile,
-    CapabilityTokenOptions {
-        issuer_did: identity.did.clone(),
-        subject: "agent-1".into(),
-        audience: vec!["wattetheria".into()],
-        issued_at_ms: 100,
-        not_before_ms: Some(100),
-        expires_at_ms: Some(200),
-        capabilities: vec![UcanCapability {
-            resource: "urn:watt:task".into(),
-            ability: "invoke".into(),
-            caveat: None,
-        }],
-        verification_method: Some("#key-1".into()),
-    },
-)?;
-assert_eq!(token.token.split('.').count(), 3);
-# Ok::<(), watt_wallet::WalletError>(())
-```
-
-### Create a Web3 payment account for x402
-
-```rust
-use watt_wallet::{FileWalletMetadataStore, InMemoryKeyStore, Wallet};
-
-let metadata_store = FileWalletMetadataStore::new("/tmp/watt-wallet-metadata-4.json");
-let keystore = InMemoryKeyStore::new();
-let mut wallet = Wallet::new(keystore, metadata_store);
-let mut profile = wallet.load_or_create_profile("default", 1)?;
-let payment = wallet.create_payment_account_web3_evm(
-    &mut profile,
-    Some("settlement".into()),
-    Some("base-sepolia".into()),
-    Some("x402".into()),
-    1,
-)?;
-assert_eq!(payment.rail, "x402");
-assert!(payment.address.as_deref().is_some());
-# Ok::<(), watt_wallet::WalletError>(())
-```
-
-### Bind an agent DID to a payment account
-
-`watt-wallet` can produce a `PaymentAccountBindingProof` that links:
-
-```text
-agent DID -> local wallet identity key -> payment account key/address
-```
-
-For spending-capable accounts, the proof is signed by both the active agent
-identity key and the payment account key. This lets a receiver verify that the
-declared payment address is controlled by the same agent DID that sent the
-message.
-
-Watch-only accounts can be represented with `PaymentAccountCustody::WatchOnly`,
-`receive_only = true`, `can_sign = false`, and no payment account proof. They
-are suitable for receiving or observing, not for proving spend authority.
 
 ## CLI
 
-The project includes a small local CLI:
+The crate includes a small local CLI for development workflows:
 
 ```bash
 cargo run --bin watt-wallet -- help
 cargo run --bin watt-wallet -- create-identity alice
 cargo run --bin watt-wallet -- list-identities
 cargo run --bin watt-wallet -- create-payment-account settlement base-sepolia
-cargo run --bin watt-wallet -- import-payment-account <private-key-hex> settlement base-sepolia
-cargo run --bin watt-wallet -- watch-payment-account 0xabc... settlement base-sepolia
 cargo run --bin watt-wallet -- list-payment-accounts
 cargo run --bin watt-wallet -- bind-payment-account <account-id>
 cargo run --bin watt-wallet -- sign-test-payload "hello"
-cargo run --bin watt-wallet -- sign-capability
 ```
 
-By default it uses:
+By default the CLI stores local data under `.watt-wallet/`:
 
-- metadata: `.watt-wallet/metadata.json`
-- keystore: `.watt-wallet/keystore.json`
+- `.watt-wallet/metadata.json`
+- `.watt-wallet/keystore.json`
 
-Override with:
+Override the storage directory with `WATT_WALLET_DIR`:
 
 ```bash
 WATT_WALLET_DIR=/custom/path cargo run --bin watt-wallet -- list-identities
 ```
 
-## Security Note
+## Payment Binding
 
-The file-backed keystore is a local development implementation.
+Payment binding proofs link an agent DID to a local wallet identity and a payment
+account key or address. Spending-capable accounts are signed by both the active
+identity key and the payment account key. Watch-only accounts can be stored for
+receiving or observing, but they cannot prove spend authority.
 
-It is useful for:
+## Security
 
-- tests
-- local iteration
-- CLI workflows
-
-It is not a replacement for future OS keychain, secure enclave, or hardware-backed adapters.
+The file-backed keystore is for tests, local iteration, and CLI development. It
+is not a replacement for OS keychain, secure enclave, or hardware-backed storage.
 
 ## Development
 
