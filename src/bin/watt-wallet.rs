@@ -158,7 +158,7 @@ fn run() -> watt_wallet::Result<()> {
                         ability: "invoke".into(),
                         caveat: None,
                     }],
-                    verification_method: Some("#key-1".into()),
+                    verification_method: None,
                 },
             )?;
             println!("{}", token.token);

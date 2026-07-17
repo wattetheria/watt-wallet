@@ -137,7 +137,7 @@ mod tests {
                     ability: "invoke".into(),
                     caveat: None,
                 }],
-                verification_method: Some("#key-1".into()),
+                verification_method: None,
             },
         )
         .unwrap();
@@ -164,7 +164,7 @@ mod tests {
                     ability: "invoke".into(),
                     caveat: None,
                 }],
-                verification_method: Some("#key-1".into()),
+                verification_method: None,
             },
         )
         .unwrap();
