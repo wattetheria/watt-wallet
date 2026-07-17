@@ -17,4 +17,4 @@ serde_json = "1"
 sha3 = "0.10"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
-watt-did = { git = "https://github.com/wattetheria/watt-did.git", branch = "main" }
+watt-did = { path = "../watt-did" }
