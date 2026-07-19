@@ -23,7 +23,8 @@ pub use crate::model::{
     SignerPurpose, SigningAlgorithm, WalletProfileMetadata,
 };
 pub use crate::payment_binding::{
-    PaymentAccountBindingProofOptions, PaymentAccountSigner, WalletPaymentAccountBindingVerifier,
-    build_payment_account_binding_proof, verify_payment_account_binding_proof,
+    ExternalAgentPaymentAccountBindingProofOptions, PaymentAccountBindingProofOptions,
+    PaymentAccountSigner, WalletPaymentAccountBindingVerifier, build_payment_account_binding_proof,
+    build_payment_account_binding_proof_with_agent_signer, verify_payment_account_binding_proof,
 };
 pub use crate::wallet::Wallet;

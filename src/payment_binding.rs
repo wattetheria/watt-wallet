@@ -82,6 +82,26 @@ pub struct PaymentAccountBindingProofOptions<'a> {
     pub watch_only_payment_address: Option<String>,
 }
 
+/// Parameters needed to mint a binding proof when the agent identity is
+/// managed outside the payment wallet.
+#[derive(Debug)]
+pub struct ExternalAgentPaymentAccountBindingProofOptions<'a> {
+    pub agent_did: Did,
+    /// Multibase-encoded Ed25519 public key bound to `agent_did`.
+    pub agent_public_key_multibase: String,
+    pub rail: String,
+    pub network: Option<String>,
+    pub custody: PaymentAccountCustody,
+    pub receive_only: bool,
+    pub can_sign: bool,
+    pub capabilities: Vec<String>,
+    pub issued_at_ms: u64,
+    pub expires_at_ms: Option<u64>,
+    pub nonce: Option<String>,
+    pub payment_signer: Option<PaymentAccountSigner<'a>>,
+    pub watch_only_payment_address: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct PaymentAccountSigner<'a> {
     pub key_handle: &'a KeyHandle,
@@ -109,6 +129,38 @@ pub fn build_payment_account_binding_proof<K: KeyStore>(
     keystore: &K,
     options: PaymentAccountBindingProofOptions<'_>,
 ) -> Result<PaymentAccountBindingProof> {
+    let agent_key_handle = options.agent_key_handle;
+    build_payment_account_binding_proof_with_agent_signer(
+        keystore,
+        ExternalAgentPaymentAccountBindingProofOptions {
+            agent_did: options.agent_did,
+            agent_public_key_multibase: options.agent_public_key_multibase,
+            rail: options.rail,
+            network: options.network,
+            custody: options.custody,
+            receive_only: options.receive_only,
+            can_sign: options.can_sign,
+            capabilities: options.capabilities,
+            issued_at_ms: options.issued_at_ms,
+            expires_at_ms: options.expires_at_ms,
+            nonce: options.nonce,
+            payment_signer: options.payment_signer,
+            watch_only_payment_address: options.watch_only_payment_address,
+        },
+        |payload| keystore.sign_bytes(agent_key_handle, payload),
+    )
+}
+
+pub fn build_payment_account_binding_proof_with_agent_signer<K, F, E>(
+    keystore: &K,
+    options: ExternalAgentPaymentAccountBindingProofOptions<'_>,
+    sign_agent: F,
+) -> Result<PaymentAccountBindingProof>
+where
+    K: KeyStore,
+    F: FnOnce(&[u8]) -> std::result::Result<SignatureBytes, E>,
+    E: std::fmt::Display,
+{
     let payment_address = resolve_payment_address(&options)?;
     let challenge_bytes = canonical_binding_challenge(BindingChallengeInput {
         agent_did: &options.agent_did,
@@ -128,7 +180,8 @@ pub fn build_payment_account_binding_proof<K: KeyStore>(
             "canonical binding challenge not valid utf-8: {error}"
         ))
     })?;
-    let agent_signature = keystore.sign_bytes(options.agent_key_handle, &challenge_bytes)?;
+    let agent_signature = sign_agent(&challenge_bytes)
+        .map_err(|error| WalletError::Metadata(format!("agent signing failed: {error}")))?;
     let agent_proof = ProofEnvelope {
         algorithm: ProofAlgorithm::Custom("ed25519-binding".to_owned()),
         value: STANDARD.encode(&agent_signature.0),
@@ -263,7 +316,9 @@ pub fn verify_payment_account_binding_proof(proof: &PaymentAccountBindingProof) 
     }
 }
 
-fn resolve_payment_address(options: &PaymentAccountBindingProofOptions<'_>) -> Result<String> {
+fn resolve_payment_address(
+    options: &ExternalAgentPaymentAccountBindingProofOptions<'_>,
+) -> Result<String> {
     match options.payment_signer.as_ref() {
         Some(signer) => {
             evm_address_from_secp256k1_multibase_public_key(&signer.public_key_multibase)
@@ -363,6 +418,39 @@ mod tests {
         .expect("build proof");
         assert_eq!(proof.agent_did, agent_info.did);
         assert!(proof.payment_account_proof.is_some());
+        verify_payment_account_binding_proof(&proof).expect("verify proof");
+    }
+
+    #[test]
+    fn external_agent_signer_can_use_a_separate_keystore() {
+        let mut agent_keystore = InMemoryKeyStore::new();
+        let agent_info = agent_keystore.generate_ed25519().expect("ed25519 key");
+        let mut payment_keystore = InMemoryKeyStore::new();
+        let payment_info = payment_keystore
+            .generate_secp256k1()
+            .expect("secp256k1 key");
+        let options = build_options(&agent_info, &payment_info);
+        let proof = build_payment_account_binding_proof_with_agent_signer(
+            &payment_keystore,
+            ExternalAgentPaymentAccountBindingProofOptions {
+                agent_did: options.agent_did,
+                agent_public_key_multibase: options.agent_public_key_multibase,
+                rail: options.rail,
+                network: options.network,
+                custody: options.custody,
+                receive_only: options.receive_only,
+                can_sign: options.can_sign,
+                capabilities: options.capabilities,
+                issued_at_ms: options.issued_at_ms,
+                expires_at_ms: options.expires_at_ms,
+                nonce: options.nonce,
+                payment_signer: options.payment_signer,
+                watch_only_payment_address: options.watch_only_payment_address,
+            },
+            |payload| agent_keystore.sign_bytes(&agent_info.key_handle, payload),
+        )
+        .expect("build proof");
+
         verify_payment_account_binding_proof(&proof).expect("verify proof");
     }
 
